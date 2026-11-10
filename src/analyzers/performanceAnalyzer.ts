@@ -353,3 +353,4 @@ export function analyzePerformance(input: PerformanceInput): PerformanceAnalysis
     dataSource: browserMetrics ? 'playwright_lab' : 'http_inspection',
   };
 }
+

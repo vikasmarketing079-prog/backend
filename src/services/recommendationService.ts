@@ -57,3 +57,4 @@ export function buildPrioritizedActionPlan(issues: IAuditIssue[]): PrioritizedRe
     affectedUrls: Array.from(item.urls),
   }));
 }
+

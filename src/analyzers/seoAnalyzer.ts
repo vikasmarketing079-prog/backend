@@ -447,3 +447,4 @@ export function analyzeSeo(url: string, html: string, statusCode: number): SeoAn
     },
   };
 }
+

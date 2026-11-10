@@ -93,3 +93,4 @@ export function isStaticResource(urlStr: string): boolean {
     return false;
   }
 }
+

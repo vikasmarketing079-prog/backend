@@ -9,6 +9,7 @@ import websiteRoutes from './routes/websiteRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import subscriptionRoutes from './routes/subscriptionRoutes.js';
 import { AuthController } from './controllers/authController.js';
+import { ScheduledScanWorker } from './jobs/scheduledScanWorker.js';
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 async function startServer(): Promise<void> {
   await connectDB();
   await AuthController.ensureSeedUser();
+  ScheduledScanWorker.start();
 
   app.listen(ENV.PORT, () => {
     console.log(`====================================================`);
@@ -70,3 +72,4 @@ startServer().catch((err) => {
   console.error('Fatal initialization error:', err);
   process.exit(1);
 });
+

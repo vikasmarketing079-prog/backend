@@ -32,3 +32,4 @@ const ScheduledScanSchema = new Schema<IScheduledScan>(
 );
 
 export const ScheduledScan = mongoose.model<IScheduledScan>('ScheduledScan', ScheduledScanSchema);
+

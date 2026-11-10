@@ -95,3 +95,4 @@ runVerification().catch((e) => {
   console.error('Verification error:', e);
   process.exit(1);
 });
+

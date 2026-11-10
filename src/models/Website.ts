@@ -30,3 +30,4 @@ const WebsiteSchema = new Schema<IWebsite>(
 );
 
 export const Website = mongoose.model<IWebsite>('Website', WebsiteSchema);
+

@@ -431,4 +431,97 @@ export class AuditController {
       res.status(500).json({ success: false, error: err.message });
     }
   }
+
+  /**
+   * Export all issues to CSV for team / client spreadsheets
+   */
+  public static async exportCsv(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const audit = await Audit.findById(id);
+      if (!audit) {
+        res.status(404).json({ success: false, error: 'Audit not found' });
+        return;
+      }
+
+      const issues = await AuditIssue.find({ audit: audit._id }).sort({ priorityScore: -1 });
+
+      const escapeCsv = (str: string) => `"${(str || '').replace(/"/g, '""')}"`;
+
+      let csv = 'Severity,Category,Title,Affected URL,Evidence,Why It Matters,Recommended Fix,Status\n';
+      for (const iss of issues) {
+        csv += [
+          escapeCsv(iss.severity),
+          escapeCsv(iss.category),
+          escapeCsv(iss.title),
+          escapeCsv(iss.url),
+          escapeCsv(iss.evidence),
+          escapeCsv(iss.whyItMatters),
+          escapeCsv(iss.recommendation),
+          escapeCsv(iss.resolved ? 'Resolved' : 'Open'),
+        ].join(',') + '\n';
+      }
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="siteaudit_issues_${new URL(audit.targetUrl).hostname}.csv"`);
+      res.send(csv);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * Export full audit report as JSON
+   */
+  public static async exportJson(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const audit = await Audit.findById(id);
+      if (!audit) {
+        res.status(404).json({ success: false, error: 'Audit not found' });
+        return;
+      }
+
+      const [issues, pages] = await Promise.all([
+        AuditIssue.find({ audit: audit._id }),
+        PageAudit.find({ audit: audit._id }),
+      ]);
+      const actionPlan = buildPrioritizedActionPlan(issues);
+
+      res.json({
+        success: true,
+        audit,
+        pages,
+        issues,
+        actionPlan,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+
+  /**
+   * Toggle issue resolution status
+   */
+  public static async toggleIssueResolved(req: Request, res: Response): Promise<void> {
+    try {
+      const { issueId } = req.params;
+      const issue = await AuditIssue.findById(issueId);
+      if (!issue) {
+        res.status(404).json({ success: false, error: 'Issue not found' });
+        return;
+      }
+
+      issue.resolved = !issue.resolved;
+      await issue.save();
+
+      res.json({
+        success: true,
+        data: issue,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
 }
+

@@ -14,8 +14,12 @@ router.get('/:id/progress', AuditController.getProgress);
 router.get('/:id/issues', AuditController.getIssues);
 router.get('/:id/pages', AuditController.getPages);
 router.get('/:id/pdf', AuditController.downloadPdf);
+router.get('/:id/export/csv', AuditController.exportCsv);
+router.get('/:id/export/json', AuditController.exportJson);
+router.patch('/issues/:issueId/toggle-resolved', AuditController.toggleIssueResolved);
 router.post('/:id/rescan', optionalAuth, AuditController.rescan);
 router.get('/:id/compare/:previousAuditId', optionalAuth, AuditController.compare);
 router.post('/reports/:id/email', AuditController.emailReport);
 
 export default router;
+

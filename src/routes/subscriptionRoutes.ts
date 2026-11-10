@@ -9,3 +9,4 @@ router.post('/checkout', requireAuth, SubscriptionController.createCheckoutSessi
 router.post('/tier', requireAuth, SubscriptionController.changeTier);
 
 export default router;
+

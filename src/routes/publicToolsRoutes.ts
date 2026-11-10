@@ -11,3 +11,4 @@ router.post('/mobile', PublicToolsController.checkMobile);
 router.post('/security-headers', PublicToolsController.checkSecurityHeaders);
 
 export default router;
+
