@@ -339,6 +339,16 @@ export function analyzePerformance(input: PerformanceInput): PerformanceAnalysis
     }
   }
 
+  // When browserMetrics are available, compute Lighthouse v10/v11 Core Web Vitals weighted score
+  if (browserMetrics && fcpMs !== undefined && lcpMs !== undefined && tbtMs !== undefined && cls !== undefined) {
+    const fcpPts = fcpMs <= 1800 ? 10 : fcpMs <= 3000 ? 8 : 4;
+    const lcpPts = lcpMs <= 2500 ? 25 : lcpMs <= 4000 ? 16 : (lcpMs <= 10000 ? 6 : 3);
+    const tbtPts = tbtMs <= 200 ? 30 : tbtMs <= 600 ? 22 : 8;
+    const clsPts = cls <= 0.1 ? 25 : cls <= 0.25 ? 15 : 0;
+    const siPts = (speedIndexMs || 3400) <= 3400 ? 10 : (speedIndexMs || 3400) <= 5800 ? 7 : 3;
+    score = fcpPts + lcpPts + tbtPts + clsPts + siPts;
+  }
+
   return {
     score: Math.max(0, Math.min(100, Math.round(score))),
     issues,
