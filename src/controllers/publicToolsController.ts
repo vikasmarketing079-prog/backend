@@ -209,5 +209,156 @@ export class PublicToolsController {
       res.status(400).json({ success: false, error: err.message });
     }
   }
+
+  /**
+   * Competitor Head-to-Head Live Battle Scanner
+   * Compares 2 websites simultaneously across Speed, SEO, Mobile, and Security
+   */
+  public static async runCompetitorBattle(req: Request, res: Response): Promise<void> {
+    try {
+      const { urlA, urlB } = req.body;
+      if (!urlA || !urlB) {
+        res.status(400).json({ success: false, error: 'Both urlA and urlB are required' });
+        return;
+      }
+
+      // Fetch both pages in parallel safely
+      const [pageA, pageB] = await Promise.all([
+        PublicToolsController.fetchTargetPage(urlA),
+        PublicToolsController.fetchTargetPage(urlB),
+      ]);
+
+      // Run analyzers on both pages in parallel
+      const [seoA, seoB, perfA, perfB, secA, secB, mobA, mobB] = await Promise.all([
+        analyzeSeo(pageA.url, pageA.html, pageA.status),
+        analyzeSeo(pageB.url, pageB.html, pageB.status),
+        analyzePerformance({
+          url: pageA.url,
+          html: pageA.html,
+          headers: pageA.headers,
+          responseTimeMs: pageA.responseTimeMs,
+          pageSizeBytes: Buffer.byteLength(pageA.html, 'utf8'),
+        }),
+        analyzePerformance({
+          url: pageB.url,
+          html: pageB.html,
+          headers: pageB.headers,
+          responseTimeMs: pageB.responseTimeMs,
+          pageSizeBytes: Buffer.byteLength(pageB.html, 'utf8'),
+        }),
+        analyzeSecurity(pageA.url, pageA.html, pageA.headers),
+        analyzeSecurity(pageB.url, pageB.html, pageB.headers),
+        analyzeMobileFromHtml(pageA.url, pageA.html),
+        analyzeMobileFromHtml(pageB.url, pageB.html),
+      ]);
+
+      // Calculate composite score (0-100)
+      const scoreA = Math.round(
+        seoA.score * 0.35 + perfA.score * 0.3 + secA.score * 0.2 + mobA.score * 0.15
+      );
+      const scoreB = Math.round(
+        seoB.score * 0.35 + perfB.score * 0.3 + secB.score * 0.2 + mobB.score * 0.15
+      );
+
+      // Determine round winners
+      const speedWinner =
+        pageA.responseTimeMs < pageB.responseTimeMs ? 'A' : pageA.responseTimeMs > pageB.responseTimeMs ? 'B' : 'TIE';
+      const seoWinner = seoA.score > seoB.score ? 'A' : seoA.score < seoB.score ? 'B' : 'TIE';
+      const secWinner = secA.score > secB.score ? 'A' : secA.score < secB.score ? 'B' : 'TIE';
+      const mobWinner = mobA.score > mobB.score ? 'A' : mobA.score < mobB.score ? 'B' : 'TIE';
+      const overallWinner = scoreA > scoreB ? 'A' : scoreA < scoreB ? 'B' : 'TIE';
+
+      // Actionable outrank tips
+      const outrankTips: string[] = [];
+      if (pageA.responseTimeMs > pageB.responseTimeMs) {
+        outrankTips.push(
+          `Your server response is ${pageA.responseTimeMs - pageB.responseTimeMs}ms slower than your competitor. Implement server caching or a CDN to beat their speed.`
+        );
+      } else {
+        outrankTips.push(
+          `You load ${pageB.responseTimeMs - pageA.responseTimeMs}ms faster than your competitor! Highlight your snappy page experience.`
+        );
+      }
+
+      if (!seoA.details.metaDescription && seoB.details.metaDescription) {
+        outrankTips.push(
+          `Competitor has an optimized meta description while yours is missing. Adding one will steal search clicks.`
+        );
+      }
+      if (seoA.details.titleLength < 40 && seoB.details.titleLength >= 45) {
+        outrankTips.push(
+          `Expand your page title to 50-60 characters with primary commercial keywords.`
+        );
+      }
+      if (secA.score < secB.score) {
+        outrankTips.push(
+          `Competitor uses tighter security defense headers (HSTS, CSP). Adding them builds stronger trust with Google.`
+        );
+      }
+      if (outrankTips.length < 3) {
+        outrankTips.push(
+          `Add schema.org structured data (Organization, FAQ) to earn Google Rich Snippets ahead of your competitor.`
+        );
+      }
+
+      res.json({
+        success: true,
+        data: {
+          siteA: {
+            url: pageA.url,
+            score: scoreA,
+            responseTimeMs: pageA.responseTimeMs,
+            pageSizeKb: (Buffer.byteLength(pageA.html, 'utf8') / 1024).toFixed(1),
+            title: seoA.details.title,
+            titleLength: seoA.details.titleLength,
+            metaDescription: seoA.details.metaDescription,
+            descLength: seoA.details.descriptionLength,
+            h1Count: seoA.details.h1s.length,
+            h1Text: seoA.details.h1s[0] || null,
+            imagesCount: seoA.details.totalImages,
+            missingAltCount: seoA.details.missingAltCount,
+            scores: {
+              seo: seoA.score,
+              performance: perfA.score,
+              security: secA.score,
+              mobile: mobA.score,
+            },
+            isHttps: pageA.url.startsWith('https://'),
+          },
+          siteB: {
+            url: pageB.url,
+            score: scoreB,
+            responseTimeMs: pageB.responseTimeMs,
+            pageSizeKb: (Buffer.byteLength(pageB.html, 'utf8') / 1024).toFixed(1),
+            title: seoB.details.title,
+            titleLength: seoB.details.titleLength,
+            metaDescription: seoB.details.metaDescription,
+            descLength: seoB.details.descriptionLength,
+            h1Count: seoB.details.h1s.length,
+            h1Text: seoB.details.h1s[0] || null,
+            imagesCount: seoB.details.totalImages,
+            missingAltCount: seoB.details.missingAltCount,
+            scores: {
+              seo: seoB.score,
+              performance: perfB.score,
+              security: secB.score,
+              mobile: mobB.score,
+            },
+            isHttps: pageB.url.startsWith('https://'),
+          },
+          winners: {
+            overall: overallWinner,
+            speed: speedWinner,
+            seo: seoWinner,
+            security: secWinner,
+            mobile: mobWinner,
+          },
+          outrankTips,
+        },
+      });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message || 'Battle analysis failed' });
+    }
+  }
 }
 
