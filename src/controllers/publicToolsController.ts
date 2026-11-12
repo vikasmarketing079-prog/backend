@@ -20,6 +20,7 @@ export class PublicToolsController {
     headers: Record<string, any>;
     status: number;
     responseTimeMs: number;
+    pageSizeBytes: number;
   }> {
     const ssrf = await validateUrlForSSRF(rawUrl);
     if (!ssrf.isValid) {
@@ -41,12 +42,15 @@ export class PublicToolsController {
       validateStatus: () => true,
     });
 
+    const htmlContent = typeof res.data === 'string' ? res.data : String(res.data || '');
+
     return {
       url: normalized,
-      html: typeof res.data === 'string' ? res.data : String(res.data || ''),
+      html: htmlContent,
       headers: res.headers,
       status: res.status,
       responseTimeMs: Date.now() - startTime,
+      pageSizeBytes: Buffer.byteLength(htmlContent, 'utf-8'),
     };
   }
 
