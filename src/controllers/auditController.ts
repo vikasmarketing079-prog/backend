@@ -82,7 +82,7 @@ export class AuditController {
     try {
       const { id } = req.params;
       const audit = await Audit.findById(id).select(
-        'status progressPercent currentStepMessage pagesDiscovered pagesScanned healthScore errorMessage completedAt'
+        'status progressPercent currentStepMessage pagesDiscovered pagesScanned healthScore categoryScores errorMessage completedAt'
       );
 
       if (!audit) {

@@ -12,6 +12,7 @@ export interface IPageAudit extends Document {
   metaDescription?: string;
   canonicalUrl?: string;
   h1Count: number;
+  h1Text?: string;
   wordCount: number;
   internalLinksCount: number;
   externalLinksCount: number;
@@ -64,6 +65,7 @@ const PageAuditSchema = new Schema<IPageAudit>(
     metaDescription: { type: String },
     canonicalUrl: { type: String },
     h1Count: { type: Number, default: 0 },
+    h1Text: { type: String },
     wordCount: { type: Number, default: 0 },
     internalLinksCount: { type: Number, default: 0 },
     externalLinksCount: { type: Number, default: 0 },

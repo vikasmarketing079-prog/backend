@@ -185,6 +185,7 @@ export class AuditService {
           metaDescription: seoResult.details.metaDescription,
           canonicalUrl: seoResult.details.canonicalUrl,
           h1Count: seoResult.details.h1s.length,
+          h1Text: seoResult.details.h1s[0] || undefined,
           wordCount: contentResult.details.wordCount,
           internalLinksCount: page.internalLinksFound.length,
           externalLinksCount: page.externalLinksFound.length,
