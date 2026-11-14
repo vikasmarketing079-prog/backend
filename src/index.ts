@@ -29,6 +29,17 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Root Status Route
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    status: 'online',
+    service: 'SiteAudit Pro Core Engine API',
+    version: '1.0.0',
+    healthy: true,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Health Check
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
