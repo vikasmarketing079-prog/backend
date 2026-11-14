@@ -18,10 +18,10 @@ const app = express();
 // Security headers
 app.disable('x-powered-by');
 
-// CORS configuration
+// CORS configuration - Allow all origins in production/dev
 app.use(
   cors({
-    origin: [ENV.FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: true,
     credentials: true,
   })
 );
@@ -74,21 +74,22 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // Start Server
 async function startServer(): Promise<void> {
-  await connectDB();
-  await AuthController.ensureSeedUser();
-  ScheduledScanWorker.start();
-
-  app.listen(ENV.PORT, () => {
+  // Bind port immediately to 0.0.0.0 so Render and cloud hosts detect health instantly
+  app.listen(ENV.PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
     console.log(`🚀 SiteAudit Pro Engine Server running on port ${ENV.PORT}`);
-    console.log(`🌐 API Endpoint: http://localhost:${ENV.PORT}/api`);
-    console.log(`📡 MongoDB: Connected to ${ENV.MONGODB_URI}`);
+    console.log(`🌐 Host: 0.0.0.0 (Cloud & Render Ready)`);
     console.log(`====================================================`);
   });
+
+  try {
+    await connectDB();
+    await AuthController.ensureSeedUser();
+    ScheduledScanWorker.start();
+  } catch (err: any) {
+    console.error('[Startup Warning] Initial background service check:', err.message || err);
+  }
 }
 
-startServer().catch((err) => {
-  console.error('Fatal initialization error:', err);
-  process.exit(1);
-});
+startServer();
 
