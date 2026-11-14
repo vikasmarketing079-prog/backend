@@ -61,7 +61,10 @@ export async function inspectSslCertificate(hostname: string, port = 443): Promi
           const validTo = new Date(cert.valid_to);
           const validFrom = new Date(cert.valid_from);
           const now = new Date();
-          const daysRemaining = Math.round((validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          const isValidDate = (d: Date) => !isNaN(d.getTime());
+          const daysRemaining = isValidDate(validTo)
+            ? Math.round((validTo.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+            : undefined;
 
           const rawIssuer = cert.issuer?.O || cert.issuer?.CN;
           const issuerStr = Array.isArray(rawIssuer) ? rawIssuer.join(', ') : (rawIssuer || 'Unknown CA');
@@ -69,11 +72,11 @@ export async function inspectSslCertificate(hostname: string, port = 443): Promi
           const subjectStr = Array.isArray(rawSubject) ? rawSubject.join(', ') : (rawSubject || hostname);
 
           resolve({
-            valid: authorized && daysRemaining > 0,
+            valid: Boolean(authorized && daysRemaining !== undefined && daysRemaining > 0),
             issuer: issuerStr,
             subject: subjectStr,
-            validFrom: validFrom.toISOString(),
-            validTo: validTo.toISOString(),
+            validFrom: isValidDate(validFrom) ? validFrom.toISOString() : undefined,
+            validTo: isValidDate(validTo) ? validTo.toISOString() : undefined,
             daysRemaining,
             error: authError,
           });
@@ -109,7 +112,8 @@ export async function inspectSslCertificate(hostname: string, port = 443): Promi
 export async function analyzeSecurity(
   url: string,
   html: string,
-  headers: Record<string, string | string[] | undefined>
+  headers: Record<string, string | string[] | undefined>,
+  cachedSslCert?: SslCertInfo
 ): Promise<SecurityAnalysisResult> {
   const issues: AnalyzerIssue[] = [];
   let score = 100;
@@ -143,7 +147,8 @@ export async function analyzeSecurity(
   // 2. SSL Certificate Details (if HTTPS)
   let sslCert: SslCertInfo | undefined;
   if (isHttps) {
-    sslCert = await inspectSslCertificate(parsedUrl.hostname);
+    const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : 443;
+    sslCert = cachedSslCert || (await inspectSslCertificate(parsedUrl.hostname, port));
     if (!sslCert.valid) {
       score -= 30;
       issues.push({

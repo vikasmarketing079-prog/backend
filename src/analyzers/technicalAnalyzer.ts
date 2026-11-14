@@ -89,7 +89,7 @@ export async function checkSitemap(originUrl: string, knownSitemapUrl?: string):
       validateStatus: (s) => s < 500,
     });
 
-    if (res.status === 200 && typeof res.data === 'string' && res.data.includes('<urlset') || res.data.includes('<sitemapindex')) {
+    if (res.status === 200 && typeof res.data === 'string' && (res.data.includes('<urlset') || res.data.includes('<sitemapindex'))) {
       const matches = res.data.match(/<loc>/g);
       return {
         hasSitemap: true,

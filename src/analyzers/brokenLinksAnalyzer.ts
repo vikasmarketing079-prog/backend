@@ -49,6 +49,8 @@ export async function testDestinationUrl(url: string): Promise<{
     const res = await axios.get(url, {
       timeout: 6000,
       maxRedirects: 3,
+      maxContentLength: 250000, // Limit link check payload download to 250KB to preserve memory
+      maxBodyLength: 250000,
       headers: {
         'User-Agent': 'SiteAuditProBot/1.0 (+https://siteauditpro.com/bot)',
         Accept: '*/*',
@@ -66,6 +68,13 @@ export async function testDestinationUrl(url: string): Promise<{
       errorType: is4xx ? 'not_found' : is5xx ? 'server_error' : undefined,
     };
   } catch (err: any) {
+    if (err.message?.includes('maxContentLength') || err.message?.includes('maxBodyLength')) {
+      return {
+        statusCode: 200,
+        statusText: 'OK',
+        isBroken: false,
+      };
+    }
     const code = err.code || '';
     if (code === 'ECONNABORTED' || err.message?.includes('timeout')) {
       return {

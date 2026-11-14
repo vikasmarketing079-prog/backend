@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import mongoose from 'express';
+import mongoose from 'mongoose';
 import fs from 'fs';
 import { Audit } from '../models/Audit.js';
 import { PageAudit } from '../models/PageAudit.js';

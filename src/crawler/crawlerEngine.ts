@@ -134,8 +134,9 @@ export class CrawlerEngine {
 
     // Try Playwright rendering for key entry pages (e.g. depth 0 homepage) if available
     if (this.browserContext && depth === 0) {
+      let page = null;
       try {
-        const page = await this.browserContext.newPage();
+        page = await this.browserContext.newPage();
         let fcp = 0;
         let lcp = 0;
         let cls = 0;
@@ -168,7 +169,6 @@ export class CrawlerEngine {
 
         const html = await page.content();
         const duration = Date.now() - startTime;
-        await page.close();
 
         const internalLinks: string[] = [];
         const externalLinks: string[] = [];
@@ -209,6 +209,14 @@ export class CrawlerEngine {
         };
       } catch (browserErr: any) {
         console.warn(`[Crawler] Browser render fallback for ${url}:`, browserErr.message);
+      } finally {
+        if (page) {
+          try {
+            await page.close();
+          } catch {
+            // ignore
+          }
+        }
       }
     }
 
@@ -278,53 +286,56 @@ export class CrawlerEngine {
 
     this.notify('Validating URL and checking robots.txt & XML sitemap...', normalizedStart);
 
-    // Check robots.txt and sitemap
-    this.robotsTxtResult = await checkRobotsTxt(this.startUrl, new URL(this.startUrl).pathname);
-    this.sitemapResult = await checkSitemap(this.startUrl, this.robotsTxtResult.sitemapsFound[0]);
+    try {
+      // Check robots.txt and sitemap
+      this.robotsTxtResult = await checkRobotsTxt(this.startUrl, new URL(this.startUrl).pathname);
+      this.sitemapResult = await checkSitemap(this.startUrl, this.robotsTxtResult.sitemapsFound[0]);
 
-    // Initialize browser
-    await this.initBrowser();
+      // Initialize browser
+      await this.initBrowser();
 
-    // Enqueue start URL
-    this.queue.push({ url: normalizedStart, depth: 0 });
-    this.discoveredUrls.add(normalizedStart);
+      // Enqueue start URL
+      this.queue.push({ url: normalizedStart, depth: 0 });
+      this.discoveredUrls.add(normalizedStart);
 
-    // BFS Queue processing loop
-    while (this.queue.length > 0 && this.visitedUrls.size < this.maxPages) {
-      const current = this.queue.shift();
-      if (!current) break;
+      // BFS Queue processing loop
+      while (this.queue.length > 0 && this.visitedUrls.size < this.maxPages) {
+        const current = this.queue.shift();
+        if (!current) break;
 
-      if (this.visitedUrls.has(current.url)) {
-        continue;
-      }
+        if (this.visitedUrls.has(current.url)) {
+          continue;
+        }
 
-      this.visitedUrls.add(current.url);
-      this.notify(`Crawling and analyzing page (${this.visitedUrls.size}/${this.maxPages}): ${current.url}`, current.url);
+        this.visitedUrls.add(current.url);
+        this.notify(`Crawling and analyzing page (${this.visitedUrls.size}/${this.maxPages}): ${current.url}`, current.url);
 
-      const pageData = await this.fetchPage(current.url, current.depth);
-      if (pageData) {
-        crawledPages.push(pageData);
+        const pageData = await this.fetchPage(current.url, current.depth);
+        if (pageData) {
+          crawledPages.push(pageData);
 
-        // Discover new internal links if not at max depth and crawl limit not exceeded
-        if (current.depth < this.maxDepth) {
-          for (const link of pageData.internalLinksFound) {
-            if (isStaticResource(link)) continue; // skip binary / image files for page crawling
+          // Discover new internal links if not at max depth and crawl limit not exceeded
+          if (current.depth < this.maxDepth) {
+            for (const link of pageData.internalLinksFound) {
+              if (isStaticResource(link)) continue; // skip binary / image files for page crawling
 
-            if (!this.discoveredUrls.has(link)) {
-              this.discoveredUrls.add(link);
-              if (this.queue.length + this.visitedUrls.size < this.maxPages * 2) {
-                this.queue.push({ url: link, depth: current.depth + 1 });
+              if (!this.discoveredUrls.has(link)) {
+                this.discoveredUrls.add(link);
+                if (this.queue.length + this.visitedUrls.size < this.maxPages * 2) {
+                  this.queue.push({ url: link, depth: current.depth + 1 });
+                }
               }
             }
           }
         }
-      }
 
-      // Friendly crawl delay (150ms) to avoid server rate-limiting
-      await new Promise((r) => setTimeout(r, 150));
+        // Friendly crawl delay (150ms) to avoid server rate-limiting
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    } finally {
+      await this.closeBrowser();
     }
 
-    await this.closeBrowser();
     this.notify('Completed crawl! Finalizing comprehensive audit scoring...', normalizedStart);
 
     return crawledPages;

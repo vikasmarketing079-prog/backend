@@ -104,6 +104,12 @@ export class ScheduledScanWorker {
           executedCount++;
         } catch (scanErr: any) {
           console.error(`[Scheduler] Failed scan for ${scan.targetUrl}:`, scanErr.message);
+          // Reschedule next run to prevent infinite 10-minute retry storms on failing targets
+          const retryNext = new Date();
+          retryNext.setDate(retryNext.getDate() + 1);
+          scan.lastRunAt = now;
+          scan.nextRunAt = retryNext;
+          await scan.save().catch(() => {});
         }
       }
     } finally {

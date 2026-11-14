@@ -94,9 +94,13 @@ export class PublicToolsController {
       let screenshot: string | null = null;
       let browserMetrics: any = null;
 
-      // Launch headless Chromium to capture real mobile paint timings and screenshot
+      // Launch headless Chromium to capture real mobile paint timings and screenshot safely
+      let browser = null;
       try {
-        const browser = await chromium.launch({ headless: true });
+        browser = await chromium.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+        });
         const context = await browser.newContext({
           viewport: { width: 375, height: 667 },
           userAgent:
@@ -122,8 +126,6 @@ export class PublicToolsController {
             loadEventEnd: nav ? nav.loadEventEnd : null,
           };
         });
-
-        await browser.close();
 
         // Calculate mobile throttled metrics matching Google Lighthouse benchmarks
         if (timings && timings.fcp) {
@@ -153,6 +155,14 @@ export class PublicToolsController {
         }
       } catch (pwErr: any) {
         console.warn('[Speed Checker] Playwright capture optional fallback:', pwErr?.message);
+      } finally {
+        if (browser) {
+          try {
+            await browser.close();
+          } catch {
+            // ignore close error
+          }
+        }
       }
 
       const result = analyzePerformance({

@@ -138,6 +138,7 @@ export class AuditService {
       let totalContentScore = 0;
 
       // Analyze each crawled page
+      let sslCertCache: any = undefined;
       for (let i = 0; i < crawledPages.length; i++) {
         const page = crawledPages[i];
         const pathname = new URL(page.url).pathname;
@@ -153,7 +154,10 @@ export class AuditService {
           browserMetrics: page.browserMetrics,
         });
         const mobileResult = analyzeMobileFromHtml(page.url, page.html);
-        const secResult = await analyzeSecurity(page.url, page.html, page.headers);
+        const secResult = await analyzeSecurity(page.url, page.html, page.headers, sslCertCache);
+        if (secResult.details.sslCert && !sslCertCache) {
+          sslCertCache = secResult.details.sslCert;
+        }
         const brokenResult = await analyzeBrokenLinks(page.url, page.html, crawler.robotsTxtResult?.sitemapsFound[0] || audit.targetUrl, 10);
         const contentResult = analyzeContent(page.url, page.html);
         const techResult = await analyzeTechnical(

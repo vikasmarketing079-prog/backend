@@ -204,10 +204,11 @@ export async function generateAuditPdf(
       { align: 'center', width: doc.page.width - 100 }
     );
 
-    doc.end();
-
     stream.on('finish', () => resolve(filePath));
     stream.on('error', (err) => reject(err));
+    doc.on('error', (err) => reject(err));
+
+    doc.end();
   });
 }
 
