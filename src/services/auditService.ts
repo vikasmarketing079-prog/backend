@@ -10,7 +10,7 @@ import { normalizeUrl } from '../crawler/urlNormalizer.js';
 import { analyzeSeo } from '../analyzers/seoAnalyzer.js';
 import { analyzePerformance } from '../analyzers/performanceAnalyzer.js';
 import { analyzeMobileFromHtml } from '../analyzers/mobileAnalyzer.js';
-import { analyzeSecurity } from '../analyzers/securityAnalyzer.js';
+import { analyzeSecurity, inspectSslCertificate } from '../analyzers/securityAnalyzer.js';
 import { analyzeBrokenLinks } from '../analyzers/brokenLinksAnalyzer.js';
 import { analyzeContent } from '../analyzers/contentAnalyzer.js';
 import { analyzeTechnical } from '../analyzers/technicalAnalyzer.js';
@@ -98,12 +98,12 @@ export class AuditService {
 
       const startTime = Date.now();
 
-      // Crawler setup
+      // Crawler setup - high speed stream crawling
       const crawler = new CrawlerEngine({
         startUrl: audit.targetUrl,
         maxPages: audit.maxPages,
         maxDepth: audit.crawlDepth,
-        enablePlaywrightRendering: true,
+        enablePlaywrightRendering: false, // Fast, lightweight HTTP parsing (saves 20-30s on Render)
         onProgress: async (p) => {
           await Audit.findByIdAndUpdate(auditId, {
             pagesDiscovered: p.pagesDiscovered,
@@ -127,9 +127,6 @@ export class AuditService {
         pagesScanned: crawledPages.length,
       });
 
-      const savedPageAudits: IPageAudit[] = [];
-      const savedIssues: IAuditIssue[] = [];
-
       let totalSeoScore = 0;
       let totalPerfScore = 0;
       let totalMobileScore = 0;
@@ -137,130 +134,150 @@ export class AuditService {
       let totalTechScore = 0;
       let totalContentScore = 0;
 
-      // Analyze each crawled page
-      let sslCertCache: any = undefined;
-      for (let i = 0; i < crawledPages.length; i++) {
-        const page = crawledPages[i];
-        const pathname = new URL(page.url).pathname;
+      // Inspect SSL cert once for the domain
+      const parsedStartUrl = new URL(audit.targetUrl);
+      const sharedSslCert = await inspectSslCertificate(
+        parsedStartUrl.hostname,
+        parsedStartUrl.port ? parseInt(parsedStartUrl.port, 10) : 443
+      );
 
-        // Run analyzers
-        const seoResult = analyzeSeo(page.url, page.html, page.statusCode);
-        const perfResult = analyzePerformance({
-          url: page.url,
-          html: page.html,
-          headers: page.headers,
-          responseTimeMs: page.responseTimeMs,
-          pageSizeBytes: page.pageSizeBytes,
-          browserMetrics: page.browserMetrics,
-        });
-        const mobileResult = analyzeMobileFromHtml(page.url, page.html);
-        const secResult = await analyzeSecurity(page.url, page.html, page.headers, sslCertCache);
-        if (secResult.details.sslCert && !sslCertCache) {
-          sslCertCache = secResult.details.sslCert;
-        }
-        const brokenResult = await analyzeBrokenLinks(page.url, page.html, crawler.robotsTxtResult?.sitemapsFound[0] || audit.targetUrl, 10);
-        const contentResult = analyzeContent(page.url, page.html);
-        const techResult = await analyzeTechnical(
-          page.url,
-          page.html,
-          page.statusCode,
-          crawler.robotsTxtResult,
-          crawler.sitemapResult
-        );
+      // Analyze all crawled pages in parallel for maximum speed
+      const analyzedPagesData = await Promise.all(
+        crawledPages.map(async (page) => {
+          const pathname = new URL(page.url).pathname;
 
-        // Accumulate scores for average
-        totalSeoScore += seoResult.score;
-        totalPerfScore += perfResult.score;
-        totalMobileScore += mobileResult.score;
-        totalSecScore += secResult.score;
-        totalTechScore += techResult.score;
-        totalContentScore += contentResult.score;
+          const [seoResult, perfResult, mobileResult, secResult, brokenResult, contentResult, techResult] =
+            await Promise.all([
+              analyzeSeo(page.url, page.html, page.statusCode),
+              analyzePerformance({
+                url: page.url,
+                html: page.html,
+                headers: page.headers,
+                responseTimeMs: page.responseTimeMs,
+                pageSizeBytes: page.pageSizeBytes,
+                browserMetrics: page.browserMetrics,
+              }),
+              analyzeMobileFromHtml(page.url, page.html),
+              analyzeSecurity(page.url, page.html, page.headers, sharedSslCert),
+              analyzeBrokenLinks(page.url, page.html, crawler.robotsTxtResult?.sitemapsFound[0] || audit.targetUrl, 4),
+              analyzeContent(page.url, page.html),
+              analyzeTechnical(page.url, page.html, page.statusCode, crawler.robotsTxtResult, crawler.sitemapResult),
+            ]);
 
-        // Save PageAudit record
-        const pageAudit = new PageAudit({
+          const allPageIssues = [
+            ...seoResult.issues,
+            ...perfResult.issues,
+            ...mobileResult.issues,
+            ...secResult.issues,
+            ...brokenResult.issues,
+            ...contentResult.issues,
+            ...techResult.issues,
+          ];
+
+          return {
+            page,
+            pathname,
+            seoResult,
+            perfResult,
+            mobileResult,
+            secResult,
+            brokenResult,
+            contentResult,
+            techResult,
+            allPageIssues,
+          };
+        })
+      );
+
+      // Prepare batch documents for high-speed bulk database insertion (single Atlas roundtrip)
+      const pageDocsToInsert: any[] = [];
+      const issueDocsToInsert: any[] = [];
+
+      for (const item of analyzedPagesData) {
+        const pageId = new mongoose.Types.ObjectId();
+
+        totalSeoScore += item.seoResult.score;
+        totalPerfScore += item.perfResult.score;
+        totalMobileScore += item.mobileResult.score;
+        totalSecScore += item.secResult.score;
+        totalTechScore += item.techResult.score;
+        totalContentScore += item.contentResult.score;
+
+        pageDocsToInsert.push({
+          _id: pageId,
           audit: audit._id,
-          url: page.url,
-          path: pathname,
-          statusCode: page.statusCode,
-          responseTimeMs: page.responseTimeMs,
-          pageSizeBytes: page.pageSizeBytes,
-          contentType: String(page.headers['content-type'] || 'text/html'),
-          title: seoResult.details.title,
-          metaDescription: seoResult.details.metaDescription,
-          canonicalUrl: seoResult.details.canonicalUrl,
-          h1Count: seoResult.details.h1s.length,
-          h1Text: seoResult.details.h1s[0] || undefined,
-          wordCount: contentResult.details.wordCount,
-          internalLinksCount: page.internalLinksFound.length,
-          externalLinksCount: page.externalLinksFound.length,
-          imagesCount: seoResult.details.totalImages,
-          missingAltCount: seoResult.details.missingAltCount,
+          url: item.page.url,
+          path: item.pathname,
+          statusCode: item.page.statusCode,
+          responseTimeMs: item.page.responseTimeMs,
+          pageSizeBytes: item.page.pageSizeBytes,
+          contentType: String(item.page.headers['content-type'] || 'text/html'),
+          title: item.seoResult.details.title,
+          metaDescription: item.seoResult.details.metaDescription,
+          canonicalUrl: item.seoResult.details.canonicalUrl,
+          h1Count: item.seoResult.details.h1s.length,
+          h1Text: item.seoResult.details.h1s[0] || undefined,
+          wordCount: item.contentResult.details.wordCount,
+          internalLinksCount: item.page.internalLinksFound.length,
+          externalLinksCount: item.page.externalLinksFound.length,
+          imagesCount: item.seoResult.details.totalImages,
+          missingAltCount: item.seoResult.details.missingAltCount,
           categoryScores: {
-            seo: seoResult.score,
-            performance: perfResult.score,
-            mobile: mobileResult.score,
-            security: secResult.score,
-            technical: techResult.score,
-            content: contentResult.score,
+            seo: item.seoResult.score,
+            performance: item.perfResult.score,
+            mobile: item.mobileResult.score,
+            security: item.secResult.score,
+            technical: item.techResult.score,
+            content: item.contentResult.score,
           },
           performanceMetrics: {
-            fcp: perfResult.metrics.fcpMs,
-            lcp: perfResult.metrics.lcpMs,
-            cls: perfResult.metrics.cls,
-            tbt: perfResult.metrics.tbtMs,
-            speedIndex: perfResult.metrics.speedIndexMs,
-            ttfb: perfResult.metrics.ttfbMs,
-            totalRequests: perfResult.metrics.requestCount,
+            fcp: item.perfResult.metrics.fcpMs,
+            lcp: item.perfResult.metrics.lcpMs,
+            cls: item.perfResult.metrics.cls,
+            tbt: item.perfResult.metrics.tbtMs,
+            speedIndex: item.perfResult.metrics.speedIndexMs,
+            ttfb: item.perfResult.metrics.ttfbMs,
+            totalRequests: item.perfResult.metrics.requestCount,
           },
           mobileFindings: {
-            viewportConfigured: mobileResult.details.viewportConfigured,
-            hasHorizontalOverflow: mobileResult.details.hasHorizontalOverflowMobile,
-            overflowDetails: mobileResult.details.overflowElements,
-            testedBreakpoints: mobileResult.details.testedBreakpoints,
+            viewportConfigured: item.mobileResult.details.viewportConfigured,
+            hasHorizontalOverflow: item.mobileResult.details.hasHorizontalOverflowMobile,
+            overflowDetails: item.mobileResult.details.overflowElements,
+            testedBreakpoints: item.mobileResult.details.testedBreakpoints,
           },
           securityHeaders: {
-            hasHsts: secResult.details.hasHsts,
-            hasCsp: secResult.details.hasCsp,
-            hasXFrame: secResult.details.hasXFrame,
-            hasXContentType: secResult.details.hasXContentType,
-            hasReferrerPolicy: secResult.details.hasReferrerPolicy,
-            hasPermissionsPolicy: secResult.details.hasPermissionsPolicy,
+            hasHsts: item.secResult.details.hasHsts,
+            hasCsp: item.secResult.details.hasCsp,
+            hasXFrame: item.secResult.details.hasXFrame,
+            hasXContentType: item.secResult.details.hasXContentType,
+            hasReferrerPolicy: item.secResult.details.hasReferrerPolicy,
+            hasPermissionsPolicy: item.secResult.details.hasPermissionsPolicy,
           },
         });
 
-        await pageAudit.save();
-        savedPageAudits.push(pageAudit);
-
-        // Aggregate issues from all modules for this page
-        const allPageIssues = [
-          ...seoResult.issues,
-          ...perfResult.issues,
-          ...mobileResult.issues,
-          ...secResult.issues,
-          ...brokenResult.issues,
-          ...contentResult.issues,
-          ...techResult.issues,
-        ];
-
-        for (const item of allPageIssues) {
-          const auditIssue = new AuditIssue({
+        for (const iss of item.allPageIssues) {
+          issueDocsToInsert.push({
             audit: audit._id,
-            pageAudit: pageAudit._id,
-            category: item.category,
-            severity: item.severity,
-            issueCode: item.issueCode,
-            title: item.title,
-            url: item.url,
-            evidence: item.evidence,
-            whyItMatters: item.whyItMatters,
-            recommendation: item.recommendation,
-            priorityScore: item.priorityScore,
+            pageAudit: pageId,
+            category: iss.category,
+            severity: iss.severity,
+            issueCode: iss.issueCode,
+            title: iss.title,
+            url: iss.url,
+            evidence: iss.evidence,
+            whyItMatters: iss.whyItMatters,
+            recommendation: iss.recommendation,
+            priorityScore: iss.priorityScore,
             resolved: false,
           });
-          await auditIssue.save();
-          savedIssues.push(auditIssue);
         }
       }
+
+      // Execute bulk inserts concurrently in parallel
+      const [savedPageAudits, savedIssues] = await Promise.all([
+        PageAudit.insertMany(pageDocsToInsert),
+        AuditIssue.insertMany(issueDocsToInsert),
+      ]);
 
       // Compute overall website scores
       const pageCount = crawledPages.length || 1;
@@ -292,9 +309,14 @@ export class AuditService {
       let pdfPath: string | undefined;
       try {
         const tempAudit = { ...audit.toObject(), healthScore: finalHealth.overallHealthScore, categoryScores: finalHealth.categoryScores, issuesSummary: finalHealth.issuesSummary, pagesScanned: crawledPages.length } as any;
-        pdfPath = await generateAuditPdf(tempAudit, savedPageAudits, savedIssues, {
-          whiteLabel: whiteLabelOptions,
-        });
+        pdfPath = await generateAuditPdf(
+          tempAudit,
+          savedPageAudits as unknown as IPageAudit[],
+          savedIssues as unknown as IAuditIssue[],
+          {
+            whiteLabel: whiteLabelOptions,
+          }
+        );
       } catch (pdfErr: any) {
         console.error('[AuditService] PDF generation notice:', pdfErr.message);
       }

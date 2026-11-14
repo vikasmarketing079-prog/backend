@@ -24,6 +24,8 @@ export interface BrokenLinksResult {
   redirectedLinks: LinkCheckItem[];
 }
 
+const destinationCache = new Map<string, any>();
+
 /**
  * Checks a specific link destination safely with timeout and SSRF check
  */
@@ -35,22 +37,28 @@ export async function testDestinationUrl(url: string): Promise<{
   isRedirect?: boolean;
   redirectTarget?: string;
 }> {
+  if (destinationCache.has(url)) {
+    return destinationCache.get(url);
+  }
+
   // First, SSRF check on destination
   const ssrf = await validateUrlForSSRF(url);
   if (!ssrf.isValid) {
-    return {
+    const res = {
       isBroken: true,
-      errorType: 'invalid_url',
+      errorType: 'invalid_url' as const,
       statusText: 'Disallowed destination address',
     };
+    destinationCache.set(url, res);
+    return res;
   }
 
   try {
     const res = await axios.get(url, {
-      timeout: 6000,
+      timeout: 2500, // Fast 2.5s timeout prevents lagging on dead servers
       maxRedirects: 3,
-      maxContentLength: 250000, // Limit link check payload download to 250KB to preserve memory
-      maxBodyLength: 250000,
+      maxContentLength: 100000,
+      maxBodyLength: 100000,
       headers: {
         'User-Agent': 'SiteAuditProBot/1.0 (+https://siteauditpro.com/bot)',
         Accept: '*/*',
@@ -61,33 +69,41 @@ export async function testDestinationUrl(url: string): Promise<{
     const is4xx = res.status >= 400 && res.status < 500;
     const is5xx = res.status >= 500;
 
-    return {
+    const result = {
       statusCode: res.status,
       statusText: res.statusText,
       isBroken: is4xx || is5xx,
-      errorType: is4xx ? 'not_found' : is5xx ? 'server_error' : undefined,
+      errorType: is4xx ? ('not_found' as const) : is5xx ? ('server_error' as const) : undefined,
     };
+    destinationCache.set(url, result);
+    return result;
   } catch (err: any) {
     if (err.message?.includes('maxContentLength') || err.message?.includes('maxBodyLength')) {
-      return {
+      const res = {
         statusCode: 200,
         statusText: 'OK',
         isBroken: false,
       };
+      destinationCache.set(url, res);
+      return res;
     }
     const code = err.code || '';
     if (code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-      return {
+      const res = {
         isBroken: false, // Don't treat network timeout as confirmed 404
-        errorType: 'timeout',
-        statusText: 'Request timed out after 6 seconds',
+        errorType: 'timeout' as const,
+        statusText: 'Request timed out after 2.5 seconds',
       };
+      destinationCache.set(url, res);
+      return res;
     }
-    return {
+    const res = {
       isBroken: true,
-      errorType: 'network_error',
+      errorType: 'network_error' as const,
       statusText: err.message || 'Network resolution failure',
     };
+    destinationCache.set(url, res);
+    return res;
   }
 }
 
