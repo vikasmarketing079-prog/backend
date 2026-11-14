@@ -48,10 +48,9 @@ app.use('/api/subscriptions', subscriptionRoutes);
 
 // In production, serve frontend static assets if dist exists
 const candidateDistPaths = [
-  path.resolve(__dirname, '../../frontend/dist'),
-  path.resolve(__dirname, '../frontend/dist'),
   path.resolve(process.cwd(), '../frontend/dist'),
   path.resolve(process.cwd(), 'frontend/dist'),
+  path.resolve(process.cwd(), 'dist/frontend'),
 ];
 const frontendDist = candidateDistPaths.find((p) => fs.existsSync(p));
 if (frontendDist) {

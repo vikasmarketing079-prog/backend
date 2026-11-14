@@ -83,7 +83,7 @@ export async function inspectSslCertificate(hostname: string, port = 443): Promi
         }
       );
 
-      socket.on('error', (err) => {
+      socket.on('error', (err: any) => {
         resolve({
           valid: false,
           error: `TLS handshake error: ${err.message}`,

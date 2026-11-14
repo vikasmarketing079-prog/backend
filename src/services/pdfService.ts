@@ -205,8 +205,8 @@ export async function generateAuditPdf(
     );
 
     stream.on('finish', () => resolve(filePath));
-    stream.on('error', (err) => reject(err));
-    doc.on('error', (err) => reject(err));
+    stream.on('error', (err: any) => reject(err));
+    doc.on('error', (err: any) => reject(err));
 
     doc.end();
   });
