@@ -54,17 +54,29 @@ export async function testDestinationUrl(url: string): Promise<{
   }
 
   try {
-    const res = await axios.get(url, {
-      timeout: 2500, // Fast 2.5s timeout prevents lagging on dead servers
-      maxRedirects: 3,
-      maxContentLength: 100000,
-      maxBodyLength: 100000,
+    let res = await axios.head(url, {
+      timeout: 1500, // Fast 1.5s HEAD request avoids downloading body
+      maxRedirects: 2,
       headers: {
         'User-Agent': 'SiteAuditProBot/1.0 (+https://siteauditpro.com/bot)',
         Accept: '*/*',
       },
-      validateStatus: () => true, // capture all status codes
+      validateStatus: () => true,
     });
+
+    // If server rejects HEAD (e.g. 405 Method Not Allowed), retry with lightweight GET
+    if (res.status === 405) {
+      res = await axios.get(url, {
+        timeout: 1500,
+        maxRedirects: 2,
+        maxContentLength: 50000,
+        headers: {
+          'User-Agent': 'SiteAuditProBot/1.0 (+https://siteauditpro.com/bot)',
+          Accept: '*/*',
+        },
+        validateStatus: () => true,
+      });
+    }
 
     const is4xx = res.status >= 400 && res.status < 500;
     const is5xx = res.status >= 500;

@@ -223,12 +223,13 @@ export class CrawlerEngine {
     // Standard HTTP fetch (fast, reliable, handles subsequent pages)
     try {
       const res = await axios.get(url, {
-        timeout: 10000,
-        maxRedirects: 4,
+        timeout: 6000,
+        maxRedirects: 3,
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 SiteAuditProBot/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
         },
         validateStatus: () => true, // capture 404, 500, etc.
       });
@@ -287,51 +288,77 @@ export class CrawlerEngine {
     this.notify('Validating URL and checking robots.txt & XML sitemap...', normalizedStart);
 
     try {
-      // Check robots.txt and sitemap
-      this.robotsTxtResult = await checkRobotsTxt(this.startUrl, new URL(this.startUrl).pathname);
-      this.sitemapResult = await checkSitemap(this.startUrl, this.robotsTxtResult.sitemapsFound[0]);
+      // Check robots.txt and sitemap concurrently in parallel
+      const [robotsSettled, sitemapSettled] = await Promise.allSettled([
+        checkRobotsTxt(this.startUrl, new URL(this.startUrl).pathname),
+        checkSitemap(this.startUrl),
+      ]);
+      this.robotsTxtResult =
+        robotsSettled.status === 'fulfilled'
+          ? robotsSettled.value
+          : { hasRobotsTxt: false, isAllowed: true, sitemapsFound: [] };
+      this.sitemapResult =
+        sitemapSettled.status === 'fulfilled' ? sitemapSettled.value : { hasSitemap: false };
 
-      // Initialize browser
+      // Initialize browser if enabled
       await this.initBrowser();
 
       // Enqueue start URL
       this.queue.push({ url: normalizedStart, depth: 0 });
       this.discoveredUrls.add(normalizedStart);
 
-      // BFS Queue processing loop
-      while (this.queue.length > 0 && this.visitedUrls.size < this.maxPages) {
-        const current = this.queue.shift();
-        if (!current) break;
+      // High-speed parallel concurrent worker pool (3 workers)
+      const concurrency = 3;
+      let activeWorkers = 0;
 
-        if (this.visitedUrls.has(current.url)) {
-          continue;
-        }
+      const runWorker = async (): Promise<void> => {
+        while (this.visitedUrls.size < this.maxPages) {
+          const current = this.queue.shift();
+          if (!current) {
+            if (activeWorkers === 0) break;
+            await new Promise((r) => setTimeout(r, 40));
+            continue;
+          }
 
-        this.visitedUrls.add(current.url);
-        this.notify(`Crawling and analyzing page (${this.visitedUrls.size}/${this.maxPages}): ${current.url}`, current.url);
+          if (this.visitedUrls.has(current.url)) {
+            continue;
+          }
 
-        const pageData = await this.fetchPage(current.url, current.depth);
-        if (pageData) {
-          crawledPages.push(pageData);
+          this.visitedUrls.add(current.url);
+          this.notify(
+            `Crawling and analyzing page (${this.visitedUrls.size}/${this.maxPages}): ${current.url}`,
+            current.url
+          );
 
-          // Discover new internal links if not at max depth and crawl limit not exceeded
-          if (current.depth < this.maxDepth) {
-            for (const link of pageData.internalLinksFound) {
-              if (isStaticResource(link)) continue; // skip binary / image files for page crawling
+          activeWorkers++;
+          let pageData: CrawledPageData | null = null;
+          try {
+            pageData = await this.fetchPage(current.url, current.depth);
+          } finally {
+            activeWorkers--;
+          }
 
-              if (!this.discoveredUrls.has(link)) {
-                this.discoveredUrls.add(link);
-                if (this.queue.length + this.visitedUrls.size < this.maxPages * 2) {
-                  this.queue.push({ url: link, depth: current.depth + 1 });
+          if (pageData) {
+            crawledPages.push(pageData);
+
+            if (current.depth < this.maxDepth) {
+              for (const link of pageData.internalLinksFound) {
+                if (isStaticResource(link)) continue;
+
+                if (!this.discoveredUrls.has(link)) {
+                  this.discoveredUrls.add(link);
+                  if (this.queue.length + this.visitedUrls.size < this.maxPages * 2) {
+                    this.queue.push({ url: link, depth: current.depth + 1 });
+                  }
                 }
               }
             }
           }
         }
+      };
 
-        // Friendly crawl delay (150ms) to avoid server rate-limiting
-        await new Promise((r) => setTimeout(r, 150));
-      }
+      const workers = Array.from({ length: concurrency }, () => runWorker());
+      await Promise.all(workers);
     } finally {
       await this.closeBrowser();
     }

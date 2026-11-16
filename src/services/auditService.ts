@@ -114,7 +114,15 @@ export class AuditService {
         },
       });
 
-      const crawledPages = await crawler.crawl();
+      // Start crawler and SSL certificate inspection simultaneously in parallel
+      const parsedStartUrl = new URL(audit.targetUrl);
+      const [crawledPages, sharedSslCert] = await Promise.all([
+        crawler.crawl(),
+        inspectSslCertificate(
+          parsedStartUrl.hostname,
+          parsedStartUrl.port ? parseInt(parsedStartUrl.port, 10) : 443
+        ),
+      ]);
 
       if (crawledPages.length === 0) {
         throw new Error('Target website could not be accessed or returned zero readable pages.');
@@ -133,13 +141,6 @@ export class AuditService {
       let totalSecScore = 0;
       let totalTechScore = 0;
       let totalContentScore = 0;
-
-      // Inspect SSL cert once for the domain
-      const parsedStartUrl = new URL(audit.targetUrl);
-      const sharedSslCert = await inspectSslCertificate(
-        parsedStartUrl.hostname,
-        parsedStartUrl.port ? parseInt(parsedStartUrl.port, 10) : 443
-      );
 
       // Analyze all crawled pages in parallel for maximum speed
       const analyzedPagesData = await Promise.all(
@@ -305,22 +306,7 @@ export class AuditService {
         }
       }
 
-      // Generate PDF Report
-      let pdfPath: string | undefined;
-      try {
-        const tempAudit = { ...audit.toObject(), healthScore: finalHealth.overallHealthScore, categoryScores: finalHealth.categoryScores, issuesSummary: finalHealth.issuesSummary, pagesScanned: crawledPages.length } as any;
-        pdfPath = await generateAuditPdf(
-          tempAudit,
-          savedPageAudits as unknown as IPageAudit[],
-          savedIssues as unknown as IAuditIssue[],
-          {
-            whiteLabel: whiteLabelOptions,
-          }
-        );
-      } catch (pdfErr: any) {
-        console.error('[AuditService] PDF generation notice:', pdfErr.message);
-      }
-
+      // Complete the audit immediately so the user sees the report in 0 delay
       await Audit.findByIdAndUpdate(auditId, {
         healthScore: finalHealth.overallHealthScore,
         categoryScores: finalHealth.categoryScores,
@@ -331,7 +317,6 @@ export class AuditService {
         currentStepMessage: 'Audit complete! Report ready.',
         progressPercent: 100,
         completedAt: new Date(),
-        pdfReportPath: pdfPath,
       });
 
       // Update Website record if linked
@@ -342,6 +327,32 @@ export class AuditService {
           healthScore: finalHealth.overallHealthScore,
         });
       }
+
+      // Generate PDF Report asynchronously in the background (zero impact on audit completion time)
+      const tempAudit = {
+        ...audit.toObject(),
+        healthScore: finalHealth.overallHealthScore,
+        categoryScores: finalHealth.categoryScores,
+        issuesSummary: finalHealth.issuesSummary,
+        pagesScanned: crawledPages.length,
+      } as any;
+
+      generateAuditPdf(
+        tempAudit,
+        savedPageAudits as unknown as IPageAudit[],
+        savedIssues as unknown as IAuditIssue[],
+        {
+          whiteLabel: whiteLabelOptions,
+        }
+      )
+        .then(async (pdfPath) => {
+          if (pdfPath) {
+            await Audit.findByIdAndUpdate(auditId, { pdfReportPath: pdfPath });
+          }
+        })
+        .catch((pdfErr: any) => {
+          console.error('[AuditService] Background PDF notice:', pdfErr.message);
+        });
     } catch (err: any) {
       await Audit.findByIdAndUpdate(auditId, {
         status: 'failed',

@@ -46,7 +46,7 @@ export async function checkRobotsTxt(originUrl: string, targetPath: string): Pro
     }
 
     const res = await axios.get(robotsUrl, {
-      timeout: 5000,
+      timeout: 2500,
       headers: { 'User-Agent': 'SiteAuditProBot/1.0' },
       validateStatus: (s) => s < 500,
     });
@@ -84,7 +84,7 @@ export async function checkSitemap(originUrl: string, knownSitemapUrl?: string):
     }
 
     const res = await axios.get(sitemapTarget, {
-      timeout: 6000,
+      timeout: 2500,
       headers: { 'User-Agent': 'SiteAuditProBot/1.0' },
       validateStatus: (s) => s < 500,
     });
